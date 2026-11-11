@@ -1,0 +1,61 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: dhanpay-mysql
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_DATABASE: ${DB_NAME:-dhanpay}
+      MYSQL_USER: ${DB_USERNAME:-dhanpay_app}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-dhanpay_secret}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-dhanpay_root_secret}
+      TZ: UTC
+    ports:
+      - "${DB_PORT:-3306}:3306"
+    volumes:
+      - dhanpay_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - dhanpay-net
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: dhanpay-backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 8080
+      DB_URL: jdbc:mysql://mysql:3306/${DB_NAME:-dhanpay}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=UTF-8
+      DB_USERNAME: ${DB_USERNAME:-dhanpay_app}
+      DB_PASSWORD: ${DB_PASSWORD:-dhanpay_secret}
+      JWT_SECRET: ${JWT_SECRET:-4d687a59324b706e5837725439714c35624e386d46326a51775a3476635870394b366852336d5738795432664e376251}
+      JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
+    ports:
+      - "${SERVER_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health | grep -q '\"status\":\"UP\"'"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    networks:
+      - dhanpay-net
+
+volumes:
+  dhanpay_mysql_data:
+    driver: local
+
+networks:
+  dhanpay-net:
+    driver: bridge
