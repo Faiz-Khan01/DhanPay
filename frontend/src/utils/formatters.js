@@ -94,6 +94,22 @@ const STATUS_STYLE_MAP = {
     label: 'Declined',
     pill: 'bg-rose-50 text-rose-500 ring-1 ring-rose-200/70',
   },
+  REVERSED: {
+    label: 'Reversed',
+    pill: 'bg-purple-50 text-purple-600 ring-1 ring-purple-200/70',
+  },
+  HELD: {
+    label: 'In Escrow',
+    pill: 'bg-sky-50 text-[#05334D] ring-1 ring-sky-200/80',
+  },
+  RELEASED: {
+    label: 'Released',
+    pill: 'bg-emerald-50 text-emerald-600 ring-1 ring-emerald-200/70',
+  },
+  REFUNDED: {
+    label: 'Refunded',
+    pill: 'bg-amber-50 text-amber-600 ring-1 ring-amber-200/70',
+  },
   ACTIVE: {
     label: 'Active',
     pill: 'bg-emerald-50 text-emerald-600 ring-1 ring-emerald-200/70',

@@ -23,6 +23,7 @@ import com.dhanpay.security.UserPrincipal;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -37,6 +38,7 @@ import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -60,6 +62,18 @@ public class TransferService {
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
     private final SecureRandom secureRandom = new SecureRandom();
+    private NotificationStreamService notificationStreamService;
+    private TwoFactorAuthService twoFactorAuthService;
+
+    @Autowired(required = false)
+    public void setNotificationStreamService(NotificationStreamService notificationStreamService) {
+        this.notificationStreamService = notificationStreamService;
+    }
+
+    @Autowired(required = false)
+    public void setTwoFactorAuthService(TwoFactorAuthService twoFactorAuthService) {
+        this.twoFactorAuthService = twoFactorAuthService;
+    }
 
     public TransferService(
             UserRepository userRepository,
@@ -179,6 +193,21 @@ public class TransferService {
                 );
             }
 
+            // Step-up authentication check for high-value transfers (> ₹10,000)
+            if (amount.compareTo(new BigDecimal("10000.0000")) > 0 && senderUser.isTotpEnabled()) {
+                String providedCode = request.totpCode();
+                if (providedCode == null || providedCode.isBlank()) {
+                    providedCode = httpRequest.getHeader("X-DhanPay-2FA-Code");
+                }
+                if (twoFactorAuthService != null && !twoFactorAuthService.validateStepUp(senderUser, providedCode)) {
+                    throw new BusinessException(
+                            HttpStatus.PRECONDITION_REQUIRED,
+                            "TWO_FACTOR_REQUIRED",
+                            "High-value transfers exceeding ₹10,000 require a valid 6-digit 2FA authenticator code"
+                    );
+                }
+            }
+
             // 6. Deduct and Credit balances
             lockedSender.debit(amount);
             lockedRecipient.credit(amount);
@@ -225,6 +254,16 @@ public class TransferService {
 
             String serializedPayload = serializeResponsePayload(responseDto);
             idempotencyService.markSuccess(senderUser.getId(), trimmedKey, transfer, serializedPayload);
+
+            if (notificationStreamService != null) {
+                notificationStreamService.sendToUser(
+                        lockedRecipient.getUser().getId(),
+                        "TRANSFER_RECEIVED",
+                        "Incoming Transfer Received",
+                        "Received ₹" + amount.setScale(2, RoundingMode.HALF_EVEN) + " from " + senderUser.getFullName(),
+                        Map.of("reference", transfer.getReference(), "amount", amount)
+                );
+            }
 
             return responseDto;
 

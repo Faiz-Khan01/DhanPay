@@ -16,6 +16,7 @@ import com.dhanpay.repository.TransferRepository;
 import com.dhanpay.repository.WalletRepository;
 import com.dhanpay.security.UserPrincipal;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -42,6 +43,12 @@ public class PaymentRequestService {
     private final TransferService transferService;
     private final AuditService auditService;
     private final SecureRandom secureRandom = new SecureRandom();
+    private NotificationStreamService notificationStreamService;
+
+    @Autowired(required = false)
+    public void setNotificationStreamService(NotificationStreamService notificationStreamService) {
+        this.notificationStreamService = notificationStreamService;
+    }
 
     public PaymentRequestService(
             PaymentRequestRepository paymentRequestRepository,
@@ -97,6 +104,16 @@ public class PaymentRequestService {
         String details = String.format("{\"requester\":\"%s\",\"payer\":\"%s\",\"amount\":\"%s\"}",
                 requesterWallet.getWalletReference(), payerWallet.getWalletReference(), normalizedAmount);
         auditService.logAction(principal.getId(), "PAYMENT_REQUEST_CREATED", "PAYMENT_REQUEST", reference, details, httpRequest);
+
+        if (notificationStreamService != null) {
+            notificationStreamService.sendToUser(
+                    payerWallet.getUser().getId(),
+                    "PAYMENT_REQUEST_RECEIVED",
+                    "New Payment Request",
+                    requesterWallet.getUser().getFullName() + " requested ₹" + normalizedAmount.setScale(2, RoundingMode.HALF_EVEN),
+                    java.util.Map.of("reference", reference, "amount", normalizedAmount)
+            );
+        }
 
         PaymentRequest reloaded = paymentRequestRepository.findByReferenceWithDetails(created.getReference())
                 .orElse(created);

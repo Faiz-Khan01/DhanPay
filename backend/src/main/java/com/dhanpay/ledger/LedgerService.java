@@ -44,54 +44,84 @@ public class LedgerService {
             Wallet senderWallet,
             Wallet recipientWallet,
             BigDecimal amount) {
+        return postTransferPair(
+                transfer,
+                senderWallet,
+                recipientWallet,
+                amount,
+                "LTX-" + transfer.getReference(),
+                LedgerTransactionType.P2P_TRANSFER
+        );
+    }
+
+    /**
+     * Records a balanced compensating DEBIT (original recipient) / CREDIT (original sender)
+     * entry pair when an admin reverses a settled P2P transfer.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public LedgerTransaction recordReversal(
+            Transfer transfer,
+            Wallet originalSenderWallet,
+            Wallet originalRecipientWallet,
+            BigDecimal amount) {
+        return postTransferPair(
+                transfer,
+                originalRecipientWallet,
+                originalSenderWallet,
+                amount,
+                "LTX-REV-" + transfer.getReference(),
+                LedgerTransactionType.REVERSAL
+        );
+    }
+
+    private LedgerTransaction postTransferPair(
+            Transfer transfer,
+            Wallet debitWallet,
+            Wallet creditWallet,
+            BigDecimal amount,
+            String ledgerReference,
+            LedgerTransactionType txType) {
         Objects.requireNonNull(transfer, "transfer must not be null");
-        Objects.requireNonNull(senderWallet, "senderWallet must not be null");
-        Objects.requireNonNull(recipientWallet, "recipientWallet must not be null");
+        Objects.requireNonNull(debitWallet, "debitWallet must not be null");
+        Objects.requireNonNull(creditWallet, "creditWallet must not be null");
         Objects.requireNonNull(amount, "amount must not be null");
 
-        if (Objects.equals(senderWallet.getId(), recipientWallet.getId())) {
-            throw new IllegalArgumentException("Sender and recipient wallets must be distinct");
+        if (Objects.equals(debitWallet.getId(), creditWallet.getId())) {
+            throw new IllegalArgumentException("Debit and credit wallets must be distinct");
         }
         if (amount.compareTo(BigDecimal.ZERO) <= 0) {
             throw new IllegalArgumentException("Transfer posting amount must be positive");
         }
-        if (!Objects.equals(senderWallet.getCurrency(), recipientWallet.getCurrency())) {
+        if (!Objects.equals(debitWallet.getCurrency(), creditWallet.getCurrency())) {
             throw new IllegalArgumentException("Cross-currency ledger posting is not supported");
         }
 
         BigDecimal normalizedAmount = amount.setScale(MONETARY_SCALE, RoundingMode.UNNECESSARY);
-        String currency = senderWallet.getCurrency();
+        String currency = debitWallet.getCurrency();
 
-        LedgerAccount senderAccount = ledgerAccountRepository.findByWalletId(senderWallet.getId())
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "LEDGER_ACCOUNT_NOT_FOUND",
-                        "Sender ledger account not found for wallet " + senderWallet.getWalletReference()
-                ));
+        LedgerAccount debitAccount = requireWalletLedgerAccount(debitWallet, "Debit");
+        LedgerAccount creditAccount = requireWalletLedgerAccount(creditWallet, "Credit");
 
-        LedgerAccount recipientAccount = ledgerAccountRepository.findByWalletId(recipientWallet.getId())
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "LEDGER_ACCOUNT_NOT_FOUND",
-                        "Recipient ledger account not found for wallet " + recipientWallet.getWalletReference()
-                ));
-
-        String ledgerReference = "LTX-" + transfer.getReference();
         LedgerTransaction ledgerTransaction = ledgerTransactionRepository.save(
-                new LedgerTransaction(
-                        transfer,
-                        ledgerReference,
-                        LedgerTransactionType.P2P_TRANSFER,
-                        LedgerTransactionStatus.POSTED
-                )
+                new LedgerTransaction(transfer, ledgerReference, txType, LedgerTransactionStatus.POSTED)
         );
 
         List<LedgerEntry> entries = List.of(
-                new LedgerEntry(ledgerTransaction, senderAccount, EntryDirection.DEBIT, normalizedAmount, currency),
-                new LedgerEntry(ledgerTransaction, recipientAccount, EntryDirection.CREDIT, normalizedAmount, currency)
+                new LedgerEntry(ledgerTransaction, debitAccount, EntryDirection.DEBIT, normalizedAmount, currency),
+                new LedgerEntry(ledgerTransaction, creditAccount, EntryDirection.CREDIT, normalizedAmount, currency)
         );
 
         assertBalanced(entries);
         ledgerEntryRepository.saveAll(entries);
         return ledgerTransaction;
+    }
+
+    private LedgerAccount requireWalletLedgerAccount(Wallet wallet, String roleLabel) {
+        return ledgerAccountRepository.findByWalletId(wallet.getId())
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "LEDGER_ACCOUNT_NOT_FOUND",
+                        roleLabel + " ledger account not found for wallet " + wallet.getWalletReference()
+                ));
     }
 
     /**
@@ -101,40 +131,109 @@ public class LedgerService {
     public LedgerTransaction recordTopUp(String topUpReference, Wallet targetWallet, BigDecimal amount) {
         Objects.requireNonNull(topUpReference, "topUpReference must not be null");
         Objects.requireNonNull(targetWallet, "targetWallet must not be null");
-        Objects.requireNonNull(amount, "amount must not be null");
-
-        if (amount.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new IllegalArgumentException("Top-up posting amount must be positive");
-        }
-
-        BigDecimal normalizedAmount = amount.setScale(MONETARY_SCALE, RoundingMode.UNNECESSARY);
-        String currency = targetWallet.getCurrency();
 
         LedgerAccount systemHoldingAccount = ledgerAccountRepository.findByAccountNumber("GL-SYS-HOLDING-INR-0001")
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "SYSTEM_HOLDING_NOT_FOUND",
                         "System holding ledger account GL-SYS-HOLDING-INR-0001 not found"
                 ));
+        LedgerAccount targetAccount = requireWalletLedgerAccount(targetWallet, "Target");
 
-        LedgerAccount targetAccount = ledgerAccountRepository.findByWalletId(targetWallet.getId())
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "LEDGER_ACCOUNT_NOT_FOUND",
-                        "Ledger account not found for wallet " + targetWallet.getWalletReference()
-                ));
+        return postSystemAccountPair(
+                "LTX-" + topUpReference,
+                LedgerTransactionType.ADJUSTMENT,
+                systemHoldingAccount,
+                targetAccount,
+                amount,
+                targetWallet.getCurrency()
+        );
+    }
 
-        String ledgerReference = "LTX-" + topUpReference;
+    /**
+     * Records DEBIT (buyer wallet) / CREDIT (GL escrow account) when locking funds in escrow.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public LedgerTransaction recordEscrowHold(
+            String escrowReference,
+            Wallet buyerWallet,
+            LedgerAccount escrowAccount,
+            BigDecimal amount) {
+        Objects.requireNonNull(buyerWallet, "buyerWallet must not be null");
+        LedgerAccount buyerAccount = requireWalletLedgerAccount(buyerWallet, "Buyer");
+        return postSystemAccountPair(
+                "LTX-ESC-HOLD-" + escrowReference,
+                LedgerTransactionType.ADJUSTMENT,
+                buyerAccount,
+                escrowAccount,
+                amount,
+                buyerWallet.getCurrency()
+        );
+    }
+
+    /**
+     * Records DEBIT (GL escrow account) / CREDIT (seller wallet) when releasing escrow funds.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public LedgerTransaction recordEscrowRelease(
+            String escrowReference,
+            LedgerAccount escrowAccount,
+            Wallet sellerWallet,
+            BigDecimal amount) {
+        Objects.requireNonNull(sellerWallet, "sellerWallet must not be null");
+        LedgerAccount sellerAccount = requireWalletLedgerAccount(sellerWallet, "Seller");
+        return postSystemAccountPair(
+                "LTX-ESC-REL-" + escrowReference,
+                LedgerTransactionType.ADJUSTMENT,
+                escrowAccount,
+                sellerAccount,
+                amount,
+                sellerWallet.getCurrency()
+        );
+    }
+
+    /**
+     * Records DEBIT (GL escrow account) / CREDIT (buyer wallet) when refunding an escrow hold.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public LedgerTransaction recordEscrowRefund(
+            String escrowReference,
+            LedgerAccount escrowAccount,
+            Wallet buyerWallet,
+            BigDecimal amount) {
+        Objects.requireNonNull(buyerWallet, "buyerWallet must not be null");
+        LedgerAccount buyerAccount = requireWalletLedgerAccount(buyerWallet, "Buyer");
+        return postSystemAccountPair(
+                "LTX-ESC-REF-" + escrowReference,
+                LedgerTransactionType.ADJUSTMENT,
+                escrowAccount,
+                buyerAccount,
+                amount,
+                buyerWallet.getCurrency()
+        );
+    }
+
+    private LedgerTransaction postSystemAccountPair(
+            String ledgerReference,
+            LedgerTransactionType txType,
+            LedgerAccount debitAccount,
+            LedgerAccount creditAccount,
+            BigDecimal amount,
+            String currency) {
+        Objects.requireNonNull(debitAccount, "debitAccount must not be null");
+        Objects.requireNonNull(creditAccount, "creditAccount must not be null");
+        Objects.requireNonNull(amount, "amount must not be null");
+        if (amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("Posting amount must be positive");
+        }
+
+        BigDecimal normalizedAmount = amount.setScale(MONETARY_SCALE, RoundingMode.UNNECESSARY);
         LedgerTransaction ledgerTransaction = ledgerTransactionRepository.save(
-                new LedgerTransaction(
-                        null,
-                        ledgerReference,
-                        LedgerTransactionType.ADJUSTMENT,
-                        LedgerTransactionStatus.POSTED
-                )
+                new LedgerTransaction(null, ledgerReference, txType, LedgerTransactionStatus.POSTED)
         );
 
         List<LedgerEntry> entries = List.of(
-                new LedgerEntry(ledgerTransaction, systemHoldingAccount, EntryDirection.DEBIT, normalizedAmount, currency),
-                new LedgerEntry(ledgerTransaction, targetAccount, EntryDirection.CREDIT, normalizedAmount, currency)
+                new LedgerEntry(ledgerTransaction, debitAccount, EntryDirection.DEBIT, normalizedAmount, currency),
+                new LedgerEntry(ledgerTransaction, creditAccount, EntryDirection.CREDIT, normalizedAmount, currency)
         );
 
         assertBalanced(entries);
@@ -144,13 +243,17 @@ public class LedgerService {
 
     @Transactional(readOnly = true)
     public TransferJournalDto getJournalForTransfer(Transfer transfer) {
-        LedgerTransaction ltx = ledgerTransactionRepository.findByTransferId(transfer.getId())
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "LEDGER_TRANSACTION_NOT_FOUND",
-                        "No ledger journal found for transfer " + transfer.getReference()
-                ));
+        List<LedgerTransaction> transactions = ledgerTransactionRepository.findAllByTransferIdOrderByIdAsc(transfer.getId());
+        if (transactions.isEmpty()) {
+            throw new ResourceNotFoundException(
+                    "LEDGER_TRANSACTION_NOT_FOUND",
+                    "No ledger journal found for transfer " + transfer.getReference()
+            );
+        }
 
-        List<JournalLineDto> lines = ledgerEntryRepository.findAllWithAccountByTransactionId(ltx.getId()).stream()
+        LedgerTransaction latest = transactions.get(transactions.size() - 1);
+        List<JournalLineDto> lines = transactions.stream()
+                .flatMap(ltx -> ledgerEntryRepository.findAllWithAccountByTransactionId(ltx.getId()).stream())
                 .map(entry -> new JournalLineDto(
                         entry.getLedgerAccount().getAccountNumber(),
                         entry.getLedgerAccount().getAccountType(),
@@ -166,9 +269,9 @@ public class LedgerService {
 
         return new TransferJournalDto(
                 transfer.getReference(),
-                ltx.getReference(),
-                ltx.getTransactionType(),
-                ltx.getStatus(),
+                latest.getReference(),
+                latest.getTransactionType(),
+                latest.getStatus(),
                 transfer.getAmount(),
                 transfer.getCurrency(),
                 transfer.getSenderWallet().getWalletReference(),

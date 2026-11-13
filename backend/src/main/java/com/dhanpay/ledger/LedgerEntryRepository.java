@@ -5,6 +5,7 @@ import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -40,6 +41,36 @@ public interface LedgerEntryRepository extends Repository<LedgerEntry, Long> {
     BigDecimal sumAmountByAccountIdAndDirection(
             @Param("accountId") Long accountId,
             @Param("direction") EntryDirection direction);
+
+    @Query("""
+            SELECT COALESCE(SUM(e.amount), 0.0000)
+            FROM LedgerEntry e
+            WHERE e.ledgerAccount.id = :accountId
+              AND e.direction = :direction
+              AND e.createdAt < :before
+            """)
+    BigDecimal sumAmountByAccountIdAndDirectionBefore(
+            @Param("accountId") Long accountId,
+            @Param("direction") EntryDirection direction,
+            @Param("before") Instant before);
+
+    @Query("""
+            SELECT e FROM LedgerEntry e
+            JOIN FETCH e.ledgerTransaction lt
+            LEFT JOIN FETCH lt.transfer t
+            LEFT JOIN FETCH t.senderWallet sw
+            LEFT JOIN FETCH sw.user su
+            LEFT JOIN FETCH t.recipientWallet rw
+            LEFT JOIN FETCH rw.user ru
+            WHERE e.ledgerAccount.id = :accountId
+              AND e.createdAt >= :from
+              AND e.createdAt <= :to
+            ORDER BY e.createdAt ASC, e.id ASC
+            """)
+    List<LedgerEntry> findEntriesForAccountBetween(
+            @Param("accountId") Long accountId,
+            @Param("from") Instant from,
+            @Param("to") Instant to);
 
     @Query("""
             SELECT COALESCE(SUM(e.amount), 0.0000)

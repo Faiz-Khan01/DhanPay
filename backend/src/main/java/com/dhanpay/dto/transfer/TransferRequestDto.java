@@ -24,6 +24,12 @@ public record TransferRequestDto(
         BigDecimal amount,
 
         @Size(max = 255, message = "Description must not exceed 255 characters")
-        String description
+        String description,
+
+        @Size(max = 16, message = "TOTP code cannot exceed 16 characters")
+        String totpCode
 ) {
+    public TransferRequestDto(String recipientWalletReference, BigDecimal amount, String description) {
+        this(recipientWalletReference, amount, description, null);
+    }
 }

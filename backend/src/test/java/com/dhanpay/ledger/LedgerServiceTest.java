@@ -91,4 +91,42 @@ class LedgerServiceTest {
         assertThatThrownBy(() -> ledgerService.recordTransfer(t, w1, w2, BigDecimal.ZERO))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void recordReversal_postsCompensatingDebitRecipientAndCreditSender() {
+        User senderUser = new User("Aarav", "aarav@example.com", "h", Role.ROLE_CUSTOMER, UserStatus.ACTIVE);
+        User recipientUser = new User("Priya", "priya@example.com", "h", Role.ROLE_CUSTOMER, UserStatus.ACTIVE);
+        Wallet senderWallet = new Wallet(senderUser, "WLT-IND-10000002", new BigDecimal("24500.0000"), "INR", WalletStatus.ACTIVE);
+        Wallet recipientWallet = new Wallet(recipientUser, "WLT-IND-10000003", new BigDecimal("15500.0000"), "INR", WalletStatus.ACTIVE);
+        ReflectionTestUtils.setField(senderWallet, "id", 2L);
+        ReflectionTestUtils.setField(recipientWallet, "id", 3L);
+
+        LedgerAccount senderAccount = new LedgerAccount(senderWallet, "LA-IND-10000002", LedgerAccountType.CUSTOMER_WALLET, "INR", LedgerAccountStatus.ACTIVE);
+        LedgerAccount recipientAccount = new LedgerAccount(recipientWallet, "LA-IND-10000003", LedgerAccountType.CUSTOMER_WALLET, "INR", LedgerAccountStatus.ACTIVE);
+        ReflectionTestUtils.setField(senderAccount, "id", 3L);
+        ReflectionTestUtils.setField(recipientAccount, "id", 4L);
+
+        Transfer transfer = new Transfer("TXN-2001", senderWallet, recipientWallet, new BigDecimal("500.0000"), "INR", TransferStatus.REVERSED, "Refund");
+        ReflectionTestUtils.setField(transfer, "id", 20L);
+
+        when(ledgerAccountRepository.findByWalletId(3L)).thenReturn(Optional.of(recipientAccount));
+        when(ledgerAccountRepository.findByWalletId(2L)).thenReturn(Optional.of(senderAccount));
+        when(ledgerTransactionRepository.save(any(LedgerTransaction.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(ledgerEntryRepository.saveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        LedgerTransaction reversalTx = ledgerService.recordReversal(transfer, senderWallet, recipientWallet, new BigDecimal("500.0000"));
+
+        assertThat(reversalTx.getReference()).isEqualTo("LTX-REV-TXN-2001");
+        assertThat(reversalTx.getTransactionType()).isEqualTo(LedgerTransactionType.REVERSAL);
+
+        ArgumentCaptor<List<LedgerEntry>> captor = ArgumentCaptor.forClass(List.class);
+        verify(ledgerEntryRepository).saveAll(captor.capture());
+        List<LedgerEntry> posted = captor.getValue();
+        assertThat(posted).hasSize(2);
+        assertThat(posted.get(0).getDirection()).isEqualTo(EntryDirection.DEBIT);
+        assertThat(posted.get(0).getLedgerAccount().getId()).isEqualTo(4L);
+        assertThat(posted.get(1).getDirection()).isEqualTo(EntryDirection.CREDIT);
+        assertThat(posted.get(1).getLedgerAccount().getId()).isEqualTo(3L);
+    }
 }

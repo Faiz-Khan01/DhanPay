@@ -7,6 +7,9 @@ import RegisterPage from './pages/RegisterPage';
 import DashboardPage from './pages/DashboardPage';
 import SendMoneyPage from './pages/SendMoneyPage';
 import TransactionHistoryPage from './pages/TransactionHistoryPage';
+import EscrowPage from './pages/EscrowPage';
+import RecurringTransfersPage from './pages/RecurringTransfersPage';
+import DeveloperPortalPage from './pages/DeveloperPortalPage';
 import AdminDashboardPage from './pages/AdminDashboardPage';
 
 export default function App() {
@@ -27,6 +30,9 @@ export default function App() {
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/send-money" element={<SendMoneyPage />} />
             <Route path="/history" element={<TransactionHistoryPage />} />
+            <Route path="/escrow" element={<EscrowPage />} />
+            <Route path="/recurring" element={<RecurringTransfersPage />} />
+            <Route path="/developer" element={<DeveloperPortalPage />} />
             <Route
               path="/admin"
               element={

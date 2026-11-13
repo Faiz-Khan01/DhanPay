@@ -2,6 +2,7 @@ package com.dhanpay.ledger;
 
 import org.springframework.data.repository.Repository;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -15,7 +16,7 @@ public interface LedgerTransactionRepository extends Repository<LedgerTransactio
 
     Optional<LedgerTransaction> findByReference(String reference);
 
-    Optional<LedgerTransaction> findByTransferId(Long transferId);
+    List<LedgerTransaction> findAllByTransferIdOrderByIdAsc(Long transferId);
 
     boolean existsByReference(String reference);
 }

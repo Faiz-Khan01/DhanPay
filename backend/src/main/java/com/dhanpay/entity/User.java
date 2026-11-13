@@ -45,6 +45,15 @@ public class User {
     @Column(name = "status", nullable = false, length = 32)
     private UserStatus status;
 
+    @Column(name = "totp_secret", length = 64)
+    private String totpSecret;
+
+    @Column(name = "totp_enabled", nullable = false)
+    private boolean totpEnabled = false;
+
+    @Column(name = "totp_backup_codes", length = 500)
+    private String totpBackupCodes;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -127,5 +136,29 @@ public class User {
 
     public Instant getUpdatedAt() {
         return updatedAt;
+    }
+
+    public String getTotpSecret() {
+        return totpSecret;
+    }
+
+    public void setTotpSecret(String totpSecret) {
+        this.totpSecret = totpSecret;
+    }
+
+    public boolean isTotpEnabled() {
+        return totpEnabled;
+    }
+
+    public void setTotpEnabled(boolean totpEnabled) {
+        this.totpEnabled = totpEnabled;
+    }
+
+    public String getTotpBackupCodes() {
+        return totpBackupCodes;
+    }
+
+    public void setTotpBackupCodes(String totpBackupCodes) {
+        this.totpBackupCodes = totpBackupCodes;
     }
 }

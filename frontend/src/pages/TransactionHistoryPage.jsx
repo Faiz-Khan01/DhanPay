@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
+  FileCheck2,
   Filter,
   Search,
   X,
@@ -18,6 +19,7 @@ import {
   formatTimestamp,
   getStatusBadge,
 } from '../utils/formatters';
+import StatementModal from '../components/StatementModal';
 
 export default function TransactionHistoryPage() {
   const [items, setItems] = useState([]);
@@ -37,6 +39,7 @@ export default function TransactionHistoryPage() {
 
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
+  const [statementModalOpen, setStatementModalOpen] = useState(false);
   const [journalModal, setJournalModal] = useState(null);
   const [loadingJournal, setLoadingJournal] = useState(false);
 
@@ -112,15 +115,26 @@ export default function TransactionHistoryPage() {
           </p>
         </div>
 
-        <button
-          type="button"
-          disabled={items.length === 0}
-          onClick={() => exportTransactionsCsv(items, `dhanpay-history-page-${page + 1}.csv`)}
-          className="inline-flex items-center gap-2 rounded-full bg-[#05334D] px-4 py-2 text-xs font-semibold text-white transition hover:bg-[#084566] disabled:opacity-40"
-        >
-          <Download className="h-3.5 w-3.5 text-[#00D084]" />
-          + Export CSV
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setStatementModalOpen(true)}
+            className="inline-flex items-center gap-2 rounded-full border border-[#05334D] bg-white px-4 py-2 text-xs font-semibold text-[#05334D] transition hover:bg-[#E6FBF5] shadow-sm"
+          >
+            <FileCheck2 className="h-3.5 w-3.5 text-[#00D084]" />
+            Certified Statement
+          </button>
+
+          <button
+            type="button"
+            disabled={items.length === 0}
+            onClick={() => exportTransactionsCsv(items, `dhanpay-history-page-${page + 1}.csv`)}
+            className="inline-flex items-center gap-2 rounded-full bg-[#05334D] px-4 py-2 text-xs font-semibold text-white transition hover:bg-[#084566] disabled:opacity-40"
+          >
+            <Download className="h-3.5 w-3.5 text-[#00D084]" />
+            + Export CSV
+          </button>
+        </div>
       </div>
 
       {/* Filters & Search Bar */}
@@ -454,6 +468,11 @@ export default function TransactionHistoryPage() {
           </div>
         </div>
       )}
+      {/* Certified Statement Modal */}
+      <StatementModal
+        isOpen={statementModalOpen}
+        onClose={() => setStatementModalOpen(false)}
+      />
     </div>
   );
 }

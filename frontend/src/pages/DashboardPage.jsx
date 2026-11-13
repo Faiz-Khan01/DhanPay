@@ -9,8 +9,10 @@ import {
   ChevronRight,
   Copy,
   Download,
+  FileText,
   Minus,
   Plus,
+  QrCode,
   RefreshCw,
   ShieldCheck,
   UserPlus,
@@ -19,6 +21,8 @@ import {
 } from 'lucide-react';
 import client, { extractApiError } from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import ReceiveQrModal from '../components/ReceiveQrModal';
+import StatementModal from '../components/StatementModal';
 import {
   exportTransactionsCsv,
   formatINR,
@@ -256,6 +260,8 @@ export default function DashboardPage() {
   const [funding, setFunding] = useState(false);
   const [fundError, setFundError] = useState('');
   const [fundBanner, setFundBanner] = useState('');
+  const [receiveQrOpen, setReceiveQrOpen] = useState(false);
+  const [statementModalOpen, setStatementModalOpen] = useState(false);
 
   // Saved beneficiaries state
   const [beneficiaries, setBeneficiaries] = useState([]);
@@ -313,6 +319,14 @@ export default function DashboardPage() {
 
   useEffect(() => {
     loadDashboard();
+  }, [loadDashboard]);
+
+  useEffect(() => {
+    const handleLiveNotification = () => {
+      loadDashboard({ silent: true });
+    };
+    window.addEventListener('dhanpay:notification', handleLiveNotification);
+    return () => window.removeEventListener('dhanpay:notification', handleLiveNotification);
   }, [loadDashboard]);
 
   const handleCopyWalletRef = async () => {
@@ -627,6 +641,22 @@ export default function DashboardPage() {
                   className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:border-[#00C896] hover:text-[#05334D] disabled:opacity-50"
                 >
                   <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin text-[#00C896]' : ''}`} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setReceiveQrOpen(true)}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-[#00C896] hover:bg-emerald-50 hover:text-[#05334D]"
+                >
+                  <QrCode className="h-4 w-4 text-[#00C896]" />
+                  My QR
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStatementModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-[#00C896] hover:bg-emerald-50 hover:text-[#05334D]"
+                >
+                  <FileText className="h-4 w-4 text-[#00C896]" />
+                  Statement
                 </button>
                 <button
                   type="button"
@@ -1021,6 +1051,17 @@ export default function DashboardPage() {
                       {copied ? 'Copied' : 'Copy'}
                     </button>
                   </div>
+                  <div className="mt-3 pt-3 border-t border-white/10 flex items-center justify-between">
+                    <span className="text-[11px] text-slate-300">Accept QR payments</span>
+                    <button
+                      type="button"
+                      onClick={() => setReceiveQrOpen(true)}
+                      className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold text-[#00D084] hover:bg-white/20 transition"
+                    >
+                      <QrCode className="h-3.5 w-3.5" />
+                      View Full QR
+                    </button>
+                  </div>
                 </div>
 
                 {wallet.ledgerAccountNumber && (
@@ -1250,6 +1291,16 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
+      <ReceiveQrModal
+        isOpen={receiveQrOpen}
+        onClose={() => setReceiveQrOpen(false)}
+      />
+
+      <StatementModal
+        isOpen={statementModalOpen}
+        onClose={() => setStatementModalOpen(false)}
+      />
     </div>
   );
 }

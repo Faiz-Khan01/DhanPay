@@ -2,11 +2,13 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   Activity,
   AlertCircle,
+  ArrowLeftRight,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Lock,
   RefreshCw,
+  RotateCcw,
   ScrollText,
   Search,
   ShieldAlert,
@@ -63,6 +65,23 @@ export default function AdminDashboardPage() {
   });
   const [auditPage, setAuditPage] = useState(0);
 
+  const [transfersPageData, setTransfersPageData] = useState({
+    content: [],
+    totalElements: 0,
+    totalPages: 0,
+    first: true,
+    last: true,
+  });
+  const [transferSearchInput, setTransferSearchInput] = useState('');
+  const [appliedTransferSearch, setAppliedTransferSearch] = useState('');
+  const [transferStatusFilter, setTransferStatusFilter] = useState('');
+  const [transferPage, setTransferPage] = useState(0);
+
+  const [reverseTarget, setReverseTarget] = useState(null);
+  const [reverseReason, setReverseReason] = useState('');
+  const [reverseModalError, setReverseModalError] = useState('');
+  const [reversingRef, setReversingRef] = useState(null);
+
   const [loadingInitial, setLoadingInitial] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
   const [actionBanner, setActionBanner] = useState('');
@@ -96,6 +115,14 @@ export default function AdminDashboardPage() {
     setAuditPageData(data);
   }, [auditPage]);
 
+  const fetchTransfers = useCallback(async () => {
+    const params = { page: transferPage, size: 8 };
+    if (appliedTransferSearch) params.search = appliedTransferSearch;
+    if (transferStatusFilter) params.status = transferStatusFilter;
+    const { data } = await client.get('/admin/transfers', { params });
+    setTransfersPageData(data);
+  }, [transferPage, appliedTransferSearch, transferStatusFilter]);
+
   useEffect(() => {
     let active = true;
     async function init() {
@@ -105,6 +132,7 @@ export default function AdminDashboardPage() {
         await Promise.all([
           fetchStatsAndReconciliation(),
           fetchUsers(),
+          fetchTransfers(),
           fetchAuditLogs(),
         ]);
       } catch (err) {
@@ -119,7 +147,7 @@ export default function AdminDashboardPage() {
     return () => {
       active = false;
     };
-  }, [fetchStatsAndReconciliation, fetchUsers, fetchAuditLogs]);
+  }, [fetchStatsAndReconciliation, fetchUsers, fetchTransfers, fetchAuditLogs]);
 
   const handleRunLedgerAudit = async () => {
     setAuditingLedger(true);
@@ -139,6 +167,47 @@ export default function AdminDashboardPage() {
     e.preventDefault();
     setUserPage(0);
     setAppliedUserSearch(userSearchInput.trim());
+  };
+
+  const handleTransferSearchSubmit = (e) => {
+    e.preventDefault();
+    setTransferPage(0);
+    setAppliedTransferSearch(transferSearchInput.trim());
+  };
+
+  const openReverseModal = (tx) => {
+    setReverseTarget(tx);
+    setReverseReason('');
+    setReverseModalError('');
+  };
+
+  const handleConfirmReverse = async (e) => {
+    e.preventDefault();
+    const trimmed = reverseReason.trim();
+    if (trimmed.length < 3) {
+      setReverseModalError('Please provide a reason (at least 3 characters) for the audit log.');
+      return;
+    }
+    setReverseModalError('');
+    setReversingRef(reverseTarget.reference);
+    try {
+      await client.post(`/admin/transfers/${encodeURIComponent(reverseTarget.reference)}/reverse`, {
+        reason: trimmed,
+      });
+      setActionBanner(`Transfer ${reverseTarget.reference} reversed and compensating ledger entries posted.`);
+      setReverseTarget(null);
+      await Promise.all([
+        fetchStatsAndReconciliation(),
+        fetchUsers(),
+        fetchTransfers(),
+        fetchAuditLogs(),
+      ]);
+    } catch (err) {
+      const { message } = extractApiError(err, 'Could not reverse transfer.');
+      setReverseModalError(message);
+    } finally {
+      setReversingRef(null);
+    }
   };
 
   const openFreezeModal = (row) => {
@@ -542,6 +611,155 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
+      {/* Platform Transfers & Reversals */}
+      <section className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-card">
+        <div className="flex flex-col gap-3 border-b border-slate-100 px-6 py-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-sky-50 text-[#05334D]">
+              <ArrowLeftRight className="h-4 w-4" />
+            </span>
+            <div>
+              <h2 className="text-base font-bold text-slate-900">Platform Transfers &amp; Reversals</h2>
+              <p className="text-xs text-slate-400">
+                Reverse settled P2P transfers using compensating double-entry ledger postings.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={transferStatusFilter}
+              onChange={(e) => {
+                setTransferPage(0);
+                setTransferStatusFilter(e.target.value);
+              }}
+              className="rounded-full border border-slate-200 bg-slate-50/70 px-3.5 py-2 text-xs font-medium text-slate-700 focus:border-[#00C896] focus:bg-white focus:outline-none"
+            >
+              <option value="">All Statuses</option>
+              <option value="SUCCESS">Settled (SUCCESS)</option>
+              <option value="REVERSED">Reversed</option>
+              <option value="FAILED">Declined (FAILED)</option>
+            </select>
+
+            <form onSubmit={handleTransferSearchSubmit} className="flex items-center gap-2">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  value={transferSearchInput}
+                  onChange={(e) => setTransferSearchInput(e.target.value)}
+                  placeholder="Reference, wallet or user..."
+                  className="rounded-full border border-slate-200 bg-slate-50/70 py-2 pl-9 pr-3 text-xs text-slate-900 placeholder-slate-400 focus:border-[#00C896] focus:bg-white focus:outline-none"
+                />
+              </div>
+              <button
+                type="submit"
+                className="rounded-full bg-[#05334D] px-4 py-2 text-xs font-semibold text-white transition hover:bg-[#074466]"
+              >
+                Search
+              </button>
+            </form>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-slate-100 text-left text-xs">
+            <thead className="bg-slate-50/80 font-semibold uppercase tracking-wider text-slate-400">
+              <tr>
+                <th className="px-5 py-3.5">Reference</th>
+                <th className="px-5 py-3.5">Sender</th>
+                <th className="px-5 py-3.5">Recipient</th>
+                <th className="px-5 py-3.5 text-right">Amount</th>
+                <th className="px-5 py-3.5">Status</th>
+                <th className="px-5 py-3.5">Timestamp</th>
+                <th className="px-5 py-3.5 text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {transfersPageData.content.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-6 py-10 text-center text-slate-400">
+                    No matching transfers found.
+                  </td>
+                </tr>
+              ) : (
+                transfersPageData.content.map((tx) => {
+                  const badge = getStatusBadge(tx.status, { preserveCode: true });
+                  return (
+                    <tr key={tx.reference} className="hover:bg-slate-50/80">
+                      <td className="whitespace-nowrap px-5 py-3.5 font-mono font-semibold text-slate-800">
+                        {tx.reference}
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <p className="font-medium text-slate-800">{tx.senderName}</p>
+                        <p className="font-mono text-[11px] text-slate-400">{tx.senderWalletReference}</p>
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <p className="font-medium text-slate-800">{tx.recipientName}</p>
+                        <p className="font-mono text-[11px] text-slate-400">{tx.recipientWalletReference}</p>
+                      </td>
+                      <td className="whitespace-nowrap px-5 py-3.5 text-right font-semibold text-slate-900 tabular-nums">
+                        {formatINR(tx.amount)}
+                      </td>
+                      <td className="whitespace-nowrap px-5 py-3.5">
+                        <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${badge.pill}`}>
+                          {badge.label}
+                        </span>
+                      </td>
+                      <td className="whitespace-nowrap px-5 py-3.5 text-slate-400">
+                        {formatTimestamp(tx.createdAt)}
+                      </td>
+                      <td className="whitespace-nowrap px-5 py-3.5 text-right">
+                        {tx.status === 'SUCCESS' ? (
+                          <button
+                            type="button"
+                            disabled={reversingRef === tx.reference}
+                            onClick={() => openReverseModal(tx)}
+                            className="inline-flex items-center gap-1 rounded-full bg-purple-50 px-3 py-1.5 text-xs font-semibold text-purple-700 ring-1 ring-purple-200 transition hover:bg-purple-100 disabled:opacity-50"
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" />
+                            Reverse
+                          </button>
+                        ) : (
+                          <span className="text-[11px] text-slate-300">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="flex items-center justify-between border-t border-slate-100 bg-slate-50/70 px-5 py-3 text-xs text-slate-500">
+          <span>{transfersPageData.totalElements} transfers</span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={transfersPageData.first || transferPage === 0}
+              onClick={() => setTransferPage((p) => Math.max(0, p - 1))}
+              className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-slate-700 disabled:opacity-45"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+              Prev
+            </button>
+            <span>
+              Page {transfersPageData.totalPages === 0 ? 0 : transferPage + 1} of {transfersPageData.totalPages}
+            </span>
+            <button
+              type="button"
+              disabled={transfersPageData.last || transferPage + 1 >= transfersPageData.totalPages}
+              onClick={() => setTransferPage((p) => p + 1)}
+              className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-slate-700 disabled:opacity-45"
+            >
+              Next
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      </section>
+
       {/* Audit Log Viewer */}
       <section className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-card">
         <div className="flex items-center gap-2.5 border-b border-slate-100 px-6 py-4">
@@ -691,6 +909,88 @@ export default function AdminDashboardPage() {
                   >
                     <Lock className="h-3.5 w-3.5" />
                     {mutatingWalletId === freezeTarget.walletId ? 'Freezing...' : 'Confirm Freeze'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reverse Transfer Modal */}
+      {reverseTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#032539]/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md overflow-hidden rounded-3xl border border-white/80 bg-white shadow-2xl">
+            <div className="flex items-start justify-between bg-[#05334D] px-6 py-4 text-white">
+              <div>
+                <h3 className="text-lg font-bold">Reverse Settled Transfer</h3>
+                <p className="mt-0.5 text-xs text-slate-300">
+                  <span className="font-mono text-emerald-300">{reverseTarget.reference}</span> •{' '}
+                  {formatINR(reverseTarget.amount)}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReverseTarget(null)}
+                className="text-slate-300 hover:text-white"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="rounded-2xl border border-slate-100 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-600">
+                Debits{' '}
+                <span className="font-mono font-semibold text-slate-800">
+                  {reverseTarget.recipientWalletReference}
+                </span>{' '}
+                and credits{' '}
+                <span className="font-mono font-semibold text-slate-800">
+                  {reverseTarget.senderWalletReference}
+                </span>
+                .
+              </div>
+
+              {reverseModalError && (
+                <div className="flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                  <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-rose-500" />
+                  <span>{reverseModalError}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleConfirmReverse} className="space-y-4">
+                <div>
+                  <label
+                    htmlFor="reverse-reason"
+                    className="block text-xs font-semibold uppercase tracking-wider text-slate-500"
+                  >
+                    Mandatory Reversal Reason
+                  </label>
+                  <textarea
+                    id="reverse-reason"
+                    rows={3}
+                    value={reverseReason}
+                    onChange={(e) => setReverseReason(e.target.value)}
+                    placeholder="e.g. Duplicate merchant settlement dispute approved"
+                    className="mt-1.5 w-full rounded-2xl border border-slate-200 bg-slate-50/70 p-3 text-sm text-slate-900 placeholder-slate-400 focus:border-[#00C896] focus:bg-white focus:outline-none"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setReverseTarget(null)}
+                    className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={reversingRef === reverseTarget.reference}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-purple-600 px-5 py-2 text-xs font-semibold text-white hover:bg-purple-700 disabled:opacity-60"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    {reversingRef === reverseTarget.reference ? 'Reversing...' : 'Confirm Reversal'}
                   </button>
                 </div>
               </form>

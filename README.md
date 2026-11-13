@@ -1,45 +1,59 @@
-# DhanPay — FinTech Transaction Processing Engine (Phase 1)
+# DhanPay — FinTech Transaction Processing Engine
 
-DhanPay is a double-entry ledger and wallet transaction processing platform built with **Java 17**, **Spring Boot 3.3.5**, **MySQL 8.0 (InnoDB)**, **Flyway**, and **React 18 + Vite + Tailwind CSS**.
+DhanPay is a double-entry general ledger and wallet transaction processing platform built with **Java 17**, **Spring Boot 3.3.5**, **MySQL 8.0 (InnoDB)**, **Flyway (`V1`–`V7`)**, and **React 18 + Vite + Tailwind CSS**.
 
-## Project Structure
+## Architecture
 
-```text
-DhanPay/
-├── backend/
-│   ├── Dockerfile
-│   ├── pom.xml
-│   └── src/main/
-│       ├── java/com/dhanpay/DhanPayApplication.java
-│       └── resources/
-│           ├── application.yml
-│           └── db/migration/
-│               ├── V1__init_schema.sql
-│               └── V2__seed_system_and_demo.sql
-├── frontend/
-│   ├── index.html
-│   ├── package.json
-│   ├── postcss.config.js
-│   ├── tailwind.config.js
-│   ├── vite.config.js
-│   └── src/
-│       ├── App.jsx
-│       ├── index.css
-│       └── main.jsx
-├── .env.example
-├── docker-compose.yml
-└── README.md
+```mermaid
+flowchart LR
+    UI["React 18 + Vite + Tailwind UI"] -->|JWT Bearer + Idempotency-Key| API["Spring Boot 3 REST API"]
+    API --> SEC["Spring Security + RBAC (CUSTOMER / ADMIN)"]
+    API --> IDEM["Database Idempotency Engine"]
+    API --> TX["Transfer / Funding / Request Services"]
+    TX --> LED["Double-Entry Ledger Service"]
+    LED --> DB[("MySQL 8.0 InnoDB + Flyway")]
+    API --> REC["Admin Reconciliation & Audit Trail"]
+    REC --> DB
 ```
 
-## Financial & Database Design Guarantees
+## Core Capabilities
 
-- **Strict Fixed-Point Arithmetic**: All monetary columns (`wallets.balance`, `transfers.amount`, `ledger_entries.amount`) use `DECIMAL(19,4)` with DB-level `CHECK` constraints (`>= 0.0000` for wallet balances, `> 0.0000` for transfer/entry amounts).
-- **Double-Entry Accounting**: Every value movement is recorded as a balanced `ledger_transactions` batch of `DEBIT` and `CREDIT` `ledger_entries`. Opening balances in `V2__seed_system_and_demo.sql` debit `GL-SYS-HOLDING-INR-0001` and credit each customer wallet ledger account so total debits equal total credits (`INR 50,000.0000`) from inception.
-- **Referential Integrity**: All foreign keys enforce `ON DELETE RESTRICT` to prevent destructive cascades on financial records.
-- **Schema Governance**: Hibernate runs with `ddl-auto: validate` and `open-in-view: false`; Flyway is the sole owner of DDL evolution.
-- **Concurrency & Idempotency**: Wallets carry an optimistic locking `version` column, and `idempotency_records` enforces uniqueness on `(user_id, idempotency_key)` with request fingerprinting and JSON response caching.
+- **Double-Entry Accounting**: Every monetary movement posts a balanced batch of `DEBIT` and `CREDIT` `ledger_entries` inside `ledger_transactions`. Total debits always equal total credits across `GL-SYS-HOLDING-INR-0001` and customer `ledger_accounts`.
+- **Strict Fixed-Point Arithmetic**: All amounts use `DECIMAL(19,4)` with MySQL `CHECK` constraints (`balance >= 0.0000`, positive entry/transfer amounts, distinct sender/recipient wallets).
+- **Concurrency & Idempotency**: Deterministic lowest-ID-first pessimistic row locks (`SELECT ... FOR UPDATE`) prevent deadlocks, and `idempotency_records` caches SHA-256 request fingerprints and JSON responses for `(user_id, idempotency_key)`.
+- **Wallet Funding & Peer Workflows**: Self-service idempotent wallet top-ups (`Fund Account`), saved recipient contacts (`Beneficiaries`), and incoming/outgoing P2P `Payment Requests` with one-click settlement.
+- **Velocity Limits & Governance**: Rolling 24-hour debit outflow limit (`₹1,00,000.00`), single transfer cap (`₹50,000.00`), user password updates, admin wallet freeze/unfreeze controls, ledger journal drilldown, and live global ledger reconciliation.
 
-## Seeded Accounts (`V2__seed_system_and_demo.sql`)
+## API Endpoints
+
+| Area | Method & Path | Description |
+| :--- | :--- | :--- |
+| **Auth** | `POST /api/auth/register` | Register customer & auto-provision INR wallet + GL account |
+| **Auth** | `POST /api/auth/login` | Authenticate credentials and issue JWT Bearer token |
+| **Auth** | `PATCH /api/auth/password` | Change password for authenticated user |
+| **Wallets** | `GET /api/wallets/me` | Fetch materialized balance, status, and linked GL account |
+| **Wallets** | `GET /api/wallets/limits` | Inspect single transfer cap & rolling 24h outflow usage |
+| **Wallets** | `POST /api/wallets/topup` | Idempotent wallet funding from `GL-SYS-HOLDING-INR-0001` |
+| **Transfers** | `POST /api/transfers` | Execute atomic P2P INR transfer (`Idempotency-Key` required) |
+| **Transfers** | `GET /api/transfers` | Paginated history with search, status, and direction filters |
+| **Transfers** | `GET /api/transfers/{ref}/journal` | Inspect balanced double-entry `DEBIT`/`CREDIT` lines |
+| **Beneficiaries** | `GET / POST / DELETE /api/beneficiaries` | Manage saved recipient `WLT-IND-...` contacts |
+| **Requests** | `GET / POST /api/requests` | Create and list incoming/outgoing payment requests |
+| **Requests** | `POST /api/requests/{ref}/pay` | Pay pending request via idempotent transfer settlement |
+| **Requests** | `POST /api/requests/{ref}/decline` | Decline (payer) or cancel (requester) pending request |
+| **Admin** | `GET /api/admin/stats` & `/reconciliation` | System metrics and live ledger balance audit (`ROLE_ADMIN`) |
+| **Admin** | `GET /api/admin/users` & `/audit-logs` | Paginated customer search and immutable audit trail |
+| **Admin** | `PATCH /api/admin/wallets/{id}/freeze` & `/unfreeze` | Freeze/unfreeze wallets with mandatory audit reason |
+
+## Flyway Schema Migrations (`V1`–`V7`)
+
+- `V1__init_schema.sql`: Core `users`, `wallets`, `transfers`, `ledger_accounts`, `ledger_transactions`, `ledger_entries`, `idempotency_records`, `audit_logs`
+- `V2__seed_system_and_demo.sql`: Seeds `GL-SYS-HOLDING-INR-0001` and demo accounts
+- `V3__align_customer_wallet_account_type.sql` – `V5__align_idempotency_status.sql`: Enum & constraint alignment
+- `V6__create_beneficiaries.sql`: Saved recipient contacts book
+- `V7__create_payment_requests.sql`: P2P INR payment request lifecycle
+
+## Seeded Demo Accounts (`V2__seed_system_and_demo.sql`)
 
 | Role | Name | Email | Password | Wallet Ref | Opening Balance (INR) |
 | :--- | :--- | :--- | :--- | :--- | ---: |
@@ -50,18 +64,30 @@ DhanPay/
 
 ## Quick Start
 
-1. Copy `.env.example` to `.env` and adjust credentials if needed:
+### Option 1: Local MySQL + IntelliJ / Maven + Vite
+1. Start MySQL 8.0 locally (default fallback in `backend/src/main/resources/application.yml` creates `dhanpay` automatically).
+2. Run the backend:
    ```bash
-   cp .env.example .env
+   cd backend
+   mvn spring-boot:run
    ```
-2. Start MySQL 8.0 and the Spring Boot backend via Docker Compose:
+3. Run the frontend (`http://localhost:5173`):
+   ```bash
+   cd frontend
+   npm install
+   npm run dev
+   ```
+4. Verify Swagger UI at `http://localhost:8080/swagger-ui.html` and health at `http://localhost:8080/actuator/health`.
+
+### Option 2: Docker Compose
+1. Copy `.env.example` to `.env` and adjust credentials if needed.
+2. Start MySQL and backend:
    ```bash
    docker compose up --build -d
    ```
-3. Verify health and Swagger UI:
-   - Health: `http://localhost:8080/actuator/health`
-   - OpenAPI UI: `http://localhost:8080/swagger-ui.html`
-4. Start the frontend dev server (optional in Phase 1):
-   ```bash
-   cd frontend && npm install && npm run dev
-   ```
+
+## Phase 3 Operational Endpoints
+- **Admin Transfer Reversal**: `GET /api/admin/transfers`, `POST /api/admin/transfers/{reference}/reverse` (posts compensating `REVERSAL` double-entry ledger entries)
+- **Escrow Holds**: `GET /api/escrow`, `POST /api/escrow`, `POST /api/escrow/{reference}/release`, `POST /api/escrow/{reference}/refund` (backed by `V8__create_escrow_holds.sql` and `GL-SYS-ESCROW-INR-0001`)
+- **Security & Automation**: Sliding-window `RateLimitingFilter` (`429 Too Many Requests` on `/api/auth/login` and `/api/transfers`) and `ScheduledReconciliationJob` (`SCHEDULED_LEDGER_AUDIT`)
+- **Real-Time Notifications**: `GET /api/notifications/stream` (authenticated SSE stream for incoming transfers, payment requests, escrow updates, reversals, and wallet status changes)

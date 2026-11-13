@@ -1,6 +1,8 @@
 package com.dhanpay.config;
 
+import com.dhanpay.developer.ApiKeyAuthenticationFilter;
 import com.dhanpay.security.JwtAuthenticationFilter;
+import com.dhanpay.security.RateLimitingFilter;
 import com.dhanpay.security.RestAccessDeniedHandler;
 import com.dhanpay.security.RestAuthenticationEntryPoint;
 import org.springframework.context.annotation.Bean;
@@ -34,14 +36,20 @@ public class SecurityConfig {
     private static final int BCRYPT_STRENGTH = 12;
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final ApiKeyAuthenticationFilter apiKeyAuthenticationFilter;
+    private final RateLimitingFilter rateLimitingFilter;
     private final RestAuthenticationEntryPoint authenticationEntryPoint;
     private final RestAccessDeniedHandler accessDeniedHandler;
 
     public SecurityConfig(
             JwtAuthenticationFilter jwtAuthenticationFilter,
+            ApiKeyAuthenticationFilter apiKeyAuthenticationFilter,
+            RateLimitingFilter rateLimitingFilter,
             RestAuthenticationEntryPoint authenticationEntryPoint,
             RestAccessDeniedHandler accessDeniedHandler) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
+        this.apiKeyAuthenticationFilter = apiKeyAuthenticationFilter;
+        this.rateLimitingFilter = rateLimitingFilter;
         this.authenticationEntryPoint = authenticationEntryPoint;
         this.accessDeniedHandler = accessDeniedHandler;
     }
@@ -58,12 +66,15 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers(HttpMethod.PATCH, "/api/auth/password").authenticated()
+                        .requestMatchers("/api/auth/2fa/**").authenticated()
                         .requestMatchers("/api/auth/**", "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
-                        .requestMatchers("/api/wallets/**", "/api/transfers/**", "/api/beneficiaries/**", "/api/requests/**").hasAnyRole("CUSTOMER", "ADMIN")
+                        .requestMatchers("/api/wallets/**", "/api/transfers/**", "/api/beneficiaries/**", "/api/requests/**", "/api/escrow/**", "/api/notifications/**", "/api/qr/**", "/api/recurring/**", "/api/developer/**").hasAnyRole("CUSTOMER", "ADMIN")
                         .anyRequest().authenticated())
+                .addFilterBefore(apiKeyAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterAfter(rateLimitingFilter, JwtAuthenticationFilter.class)
                 .build();
     }
 

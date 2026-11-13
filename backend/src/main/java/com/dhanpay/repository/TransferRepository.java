@@ -77,4 +77,40 @@ public interface TransferRepository extends JpaRepository<Transfer, Long> {
             @Param("walletId") Long walletId,
             @Param("status") TransferStatus status,
             @Param("since") Instant since);
+
+    @Query(
+            value = """
+                    SELECT t FROM Transfer t
+                    JOIN FETCH t.senderWallet sw
+                    JOIN FETCH sw.user su
+                    JOIN FETCH t.recipientWallet rw
+                    JOIN FETCH rw.user ru
+                    WHERE (:status IS NULL OR t.status = :status)
+                    AND (
+                        :search IS NULL OR :search = ''
+                        OR LOWER(t.reference) LIKE LOWER(CONCAT('%', :search, '%'))
+                        OR LOWER(sw.walletReference) LIKE LOWER(CONCAT('%', :search, '%'))
+                        OR LOWER(rw.walletReference) LIKE LOWER(CONCAT('%', :search, '%'))
+                        OR LOWER(su.fullName) LIKE LOWER(CONCAT('%', :search, '%'))
+                        OR LOWER(ru.fullName) LIKE LOWER(CONCAT('%', :search, '%'))
+                    )
+                    ORDER BY t.createdAt DESC, t.id DESC
+                    """,
+            countQuery = """
+                    SELECT COUNT(t) FROM Transfer t
+                    WHERE (:status IS NULL OR t.status = :status)
+                    AND (
+                        :search IS NULL OR :search = ''
+                        OR LOWER(t.reference) LIKE LOWER(CONCAT('%', :search, '%'))
+                        OR LOWER(t.senderWallet.walletReference) LIKE LOWER(CONCAT('%', :search, '%'))
+                        OR LOWER(t.recipientWallet.walletReference) LIKE LOWER(CONCAT('%', :search, '%'))
+                        OR LOWER(t.senderWallet.user.fullName) LIKE LOWER(CONCAT('%', :search, '%'))
+                        OR LOWER(t.recipientWallet.user.fullName) LIKE LOWER(CONCAT('%', :search, '%'))
+                    )
+                    """
+    )
+    Page<Transfer> findAdminTransfers(
+            @Param("status") TransferStatus status,
+            @Param("search") String search,
+            Pageable pageable);
 }

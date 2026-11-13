@@ -9,12 +9,15 @@ import {
   Download,
   KeyRound,
   Printer,
+  QrCode,
+  Scan,
   Send,
   ShieldCheck,
   Wallet as WalletIcon,
 } from 'lucide-react';
 import client, { extractApiError } from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import ScanQrModal from '../components/ScanQrModal';
 import {
   formatINR,
   formatTimestamp,
@@ -57,6 +60,8 @@ export default function SendMoneyPage() {
   const [receipt, setReceipt] = useState(null);
   const [beneficiaries, setBeneficiaries] = useState([]);
   const [limits, setLimits] = useState(null);
+  const [scanQrOpen, setScanQrOpen] = useState(false);
+  const [totpCode, setTotpCode] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -164,6 +169,7 @@ export default function SendMoneyPage() {
         recipientWalletReference: recipientRef.trim(),
         amount: Number(amountInput.trim()).toFixed(4),
         description: description.trim() || 'P2P Wallet Transfer',
+        totpCode: totpCode.trim() || undefined,
       };
 
       const { data } = await client.post('/transfers', payload, {
@@ -339,12 +345,22 @@ export default function SendMoneyPage() {
           noValidate
         >
           <div>
-            <label
-              htmlFor="recipient-ref"
-              className="block text-xs font-semibold uppercase tracking-wider text-slate-500"
-            >
-              Recipient Wallet Reference
-            </label>
+            <div className="flex items-center justify-between">
+              <label
+                htmlFor="recipient-ref"
+                className="block text-xs font-semibold uppercase tracking-wider text-slate-500"
+              >
+                Recipient Wallet Reference
+              </label>
+              <button
+                type="button"
+                onClick={() => setScanQrOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200/80 transition hover:bg-emerald-100"
+              >
+                <Scan className="h-3.5 w-3.5 text-[#00C896]" />
+                Scan or Import QR
+              </button>
+            </div>
             <input
               id="recipient-ref"
               type="text"
@@ -494,6 +510,28 @@ export default function SendMoneyPage() {
               <span>Double-entry debit and credit entries commit atomically inside PostgreSQL/MySQL.</span>
             </div>
 
+            {numericAmount > 10000 && (
+              <div className="rounded-2xl border border-emerald-300 bg-emerald-50/70 p-4 space-y-2">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="h-4 w-4 text-[#00C896]" />
+                  <span className="text-xs font-bold text-slate-800">
+                    2FA Step-Up Protection Required (Transfers &gt; ₹10,000)
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  If 2FA is active on your account, enter your 6-digit authenticator code (or backup code):
+                </p>
+                <input
+                  type="text"
+                  maxLength={10}
+                  value={totpCode}
+                  onChange={(e) => setTotpCode(e.target.value)}
+                  placeholder="e.g. 123456"
+                  className="w-full rounded-xl border border-slate-200 bg-white p-2.5 font-mono text-center text-sm font-bold tracking-widest text-slate-900 focus:border-[#00C896] focus:outline-none"
+                />
+              </div>
+            )}
+
             <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
               <button
                 type="button"
@@ -607,6 +645,16 @@ export default function SendMoneyPage() {
           </div>
         </div>
       )}
+
+      <ScanQrModal
+        isOpen={scanQrOpen}
+        onClose={() => setScanQrOpen(false)}
+        onVerifiedCounterparty={(data) => {
+          setRecipientRef(data.recipientWalletReference);
+          if (data.amount) setAmountInput(data.amount);
+          if (data.description) setDescription(data.description);
+        }}
+      />
     </div>
   );
 }

@@ -1,9 +1,12 @@
 package com.dhanpay.controller;
 
 import com.dhanpay.dto.admin.AdminStatsDto;
+import com.dhanpay.dto.admin.AdminTransferItemDto;
 import com.dhanpay.dto.admin.AdminUserWalletDto;
 import com.dhanpay.dto.admin.AuditLogItemDto;
 import com.dhanpay.dto.admin.FreezeWalletRequest;
+import com.dhanpay.dto.admin.ReverseTransferRequestDto;
+import com.dhanpay.entity.TransferStatus;
 import com.dhanpay.ledger.ReconciliationReportDto;
 import com.dhanpay.security.UserPrincipal;
 import com.dhanpay.service.AdminService;
@@ -19,6 +22,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -83,6 +87,26 @@ public class AdminController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
         return ResponseEntity.ok(adminService.getAuditLogs(page, size));
+    }
+
+    @GetMapping("/transfers")
+    @Operation(summary = "List platform transfers", description = "Returns paginated P2P transfers filterable by status and reference/wallet/user search")
+    public ResponseEntity<Page<AdminTransferItemDto>> getTransfers(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) TransferStatus status,
+            @RequestParam(required = false) String search) {
+        return ResponseEntity.ok(adminService.getTransfers(page, size, status, search));
+    }
+
+    @PostMapping("/transfers/{reference}/reverse")
+    @Operation(summary = "Reverse a settled transfer", description = "Posts compensating double-entry ledger entries, restores sender balance, debits recipient, and logs an audit entry")
+    public ResponseEntity<AdminTransferItemDto> reverseTransfer(
+            @PathVariable String reference,
+            @Valid @RequestBody ReverseTransferRequestDto request,
+            @Parameter(hidden = true) @AuthenticationPrincipal UserPrincipal principal,
+            HttpServletRequest httpRequest) {
+        return ResponseEntity.ok(adminService.reverseTransfer(reference, request.reason(), principal, httpRequest));
     }
 
     @GetMapping("/reconciliation")
