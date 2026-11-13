@@ -44,7 +44,7 @@ public class PaymentRequest {
     @Column(name = "amount", nullable = false, updatable = false, precision = 19, scale = 4)
     private BigDecimal amount;
 
-    @Column(name = "currency", nullable = false, updatable = false, length = 3)
+    @Column(name = "currency", nullable = false, updatable = false, length = 3, columnDefinition = "CHAR(3)")
     private String currency = "INR";
 
     @Enumerated(EnumType.STRING)
